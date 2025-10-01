@@ -22,7 +22,7 @@ target_compile_definitions(eqa_buffsong_asi PRIVATE _CRT_SECURE_NO_WARNINGS)
 
 target_include_directories(eqa_buffsong_asi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# emit .asi alongside the DLL
+# also emit .asi next to the DLL
 add_custom_command(TARGET eqa_buffsong_asi POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:eqa_buffsong_asi> $<TARGET_FILE_DIR:eqa_buffsong_asi>/eqa_buffsong.asi
 )
