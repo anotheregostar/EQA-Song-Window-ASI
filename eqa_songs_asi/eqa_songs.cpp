@@ -251,73 +251,74 @@ bool __cdecl GetLabelFromEQ_Detour(int EqType, PEQCXSTR* str, bool* override_col
 
 void __fastcall EQMACMQ_DETOUR_CBuffWindow__RefreshBuffDisplay(CBuffWindow* this_ptr, void* /*not_used*/)
 {
-        auto* buffWindow = (PEQCBUFFWINDOW)this_ptr;
-        auto* charInfo = (PEQCHARINFO)EQ_OBJECT_CharInfo;
-        if (!charInfo) {
-                return;
-        }
+	auto* buffWindow = (PEQCBUFFWINDOW)this_ptr;
+	auto* charInfo = (PEQCHARINFO)EQ_OBJECT_CharInfo;
+	if (!charInfo) {
+		return;
+	}
 
-        const bool is_song_window = (this_ptr == GetShortDurationBuffWindow());
-        const size_t buff_count = is_song_window ? GetShortBuffCount() : EQ_NUM_BUFFS;
-        _EQBUFFINFO* buffs = GetStartBuffArray(is_song_window);
+	const bool is_song_window = (this_ptr == GetShortDurationBuffWindow());
+	const size_t buff_count = EQ_NUM_BUFFS;
+	_EQBUFFINFO* buffs = GetStartBuffArray(is_song_window);
 
-        // Ensure GetBuff routes to the song slots while this window draws
-        const bool prev_routing = ShortBuffSupport_ReturnSongBuffs;
-        MakeGetBuffReturnSongs(is_song_window);
-        EQMACMQ_REAL_CBuffWindow__RefreshBuffDisplay(this_ptr);
-        MakeGetBuffReturnSongs(prev_routing);
+	// Ensure GetBuff routes to the song slots while this window draws
+	const bool prev_routing = ShortBuffSupport_ReturnSongBuffs;
+	MakeGetBuffReturnSongs(is_song_window);
+	EQMACMQ_REAL_CBuffWindow__RefreshBuffDisplay(this_ptr);
+	MakeGetBuffReturnSongs(prev_routing);
 
-        // Inject timers into tooltips and keep count for auto-hide logic
-        int num_buffs = 0;
-        for (size_t i = 0; i < buff_count; ++i) {
-                EQBUFFINFO& buff = buffs[i];
-                if (!EQ_Spell::IsValidSpellIndex(buff.SpellId) || buff.BuffType == 0) {
-                        continue;
-                }
+	// Inject timers into tooltips and keep count for auto-hide logic
+	int num_buffs = 0;
+	for (size_t i = 0; i < buff_count; ++i) {
+		EQBUFFINFO& buff = buffs[i];
+		if (!EQ_Spell::IsValidSpellIndex(buff.SpellId) || buff.BuffType == 0) {
+			continue;
+		}
 
-                ++num_buffs;
-                if (buff.Ticks == 0) {
-                        continue;
-                }
+		++num_buffs;
+		if (buff.Ticks == 0) {
+			continue;
+		}
 
-                auto* btn = buffWindow->BuffButtonWnd[i];
-                if (btn && btn->CSidlWnd.EQWnd.ToolTipText) {
-                        auto originalSize = btn->CSidlWnd.EQWnd.FontPointer->Size;
-                        char buffTickTimeText[128];
-                        EQ_GetShortTickTimeString(buff.Ticks, buffTickTimeText, sizeof(buffTickTimeText));
+		auto* btn = buffWindow->BuffButtonWnd[i];
+		if (btn && btn->CSidlWnd.EQWnd.ToolTipText) {
+			auto originalSize = btn->CSidlWnd.EQWnd.FontPointer->Size;
+			char buffTickTimeText[128];
+			EQ_GetShortTickTimeString(buff.Ticks, buffTickTimeText, sizeof(buffTickTimeText));
 
-                        btn->CSidlWnd.EQWnd.FontPointer->Size = g_buffWindowTimersFontSize;
+			btn->CSidlWnd.EQWnd.FontPointer->Size = g_buffWindowTimersFontSize;
 
-                        char original[128];
-                        strncpy_s(original, sizeof(original), btn->CSidlWnd.EQWnd.ToolTipText->Text, _TRUNCATE);
+			char original[128];
+			strncpy_s(original, sizeof(original), btn->CSidlWnd.EQWnd.ToolTipText->Text, _TRUNCATE);
 
-                        EQ_CXStr_Set(&btn->CSidlWnd.EQWnd.ToolTipText, buffTickTimeText);
-                        CXRect r = ((CXWnd*)btn)->GetScreenRect();
-                        ((CXWnd*)btn)->DrawTooltipAtPoint(r.X1, r.Y1);
-                        EQ_CXStr_Set(&btn->CSidlWnd.EQWnd.ToolTipText, original);
-                        btn->CSidlWnd.EQWnd.FontPointer->Size = originalSize;
-                }
-        }
+			EQ_CXStr_Set(&btn->CSidlWnd.EQWnd.ToolTipText, buffTickTimeText);
+			CXRect r = ((CXWnd*)btn)->GetScreenRect();
+			((CXWnd*)btn)->DrawTooltipAtPoint(r.X1, r.Y1);
+			EQ_CXStr_Set(&btn->CSidlWnd.EQWnd.ToolTipText, original);
+			btn->CSidlWnd.EQWnd.FontPointer->Size = originalSize;
+		}
+	}
 
-        if (is_song_window) {
-                if (this_ptr->IsVisibile()) {
-                        if ((num_buffs == 0 && g_bSongWindowAutoHide) || buff_count == 0) {
-                                this_ptr->Show(0, 1);
-                        }
-                } else if (num_buffs > 0) {
-                        this_ptr->Show(1, 1);
-                }
-        }
+	if (is_song_window) {
+		if (this_ptr->IsVisibile()) {
+			if (num_buffs == 0 && (g_bSongWindowAutoHide || Rule_Num_Short_Buffs == 0)) {
+				this_ptr->Show(0, 1);
+			}
+		}
+		else if (num_buffs > 0) {
+			this_ptr->Show(1, 1);
+		}
+	}
 }
 
 int __fastcall EQMACMQ_DETOUR_CBuffWindow__OnProcessFrame(CBuffWindow* this_ptr, void* /*not_used*/)
 {
-        const bool prev_routing = ShortBuffSupport_ReturnSongBuffs;
-        const bool is_song_window = (this_ptr == GetShortDurationBuffWindow());
-        MakeGetBuffReturnSongs(is_song_window);
-        int result = EQMACMQ_REAL_CBuffWindow__OnProcessFrame(this_ptr);
-        MakeGetBuffReturnSongs(prev_routing);
-        return result;
+	const bool prev_routing = ShortBuffSupport_ReturnSongBuffs;
+	const bool is_song_window = (this_ptr == GetShortDurationBuffWindow());
+	MakeGetBuffReturnSongs(is_song_window);
+	int result = EQMACMQ_REAL_CBuffWindow__OnProcessFrame(this_ptr);
+	MakeGetBuffReturnSongs(prev_routing);
+	return result;
 }
 
 //void __fastcall EQMACMQ_DETOUR_CBuffWindow__RefreshBuffDisplay(CBuffWindow* this_ptr, void* not_used)
@@ -389,10 +390,10 @@ int __fastcall EQMACMQ_DETOUR_CBuffWindow__OnProcessFrame(CBuffWindow* this_ptr,
 
 int __fastcall EQMACMQ_DETOUR_CBuffWindow__PostDraw(CBuffWindow* this_ptr, void* /*not_used*/)
 {
-        const bool prev_routing = ShortBuffSupport_ReturnSongBuffs;
-        const bool is_song_window = (this_ptr == GetShortDurationBuffWindow());
-        const size_t buff_count = is_song_window ? GetShortBuffCount() : EQ_NUM_BUFFS;
-        MakeGetBuffReturnSongs(is_song_window);
+	const bool prev_routing = ShortBuffSupport_ReturnSongBuffs;
+	const bool is_song_window = (this_ptr == GetShortDurationBuffWindow());
+	const size_t buff_count = EQ_NUM_BUFFS;
+	MakeGetBuffReturnSongs(is_song_window);
 
 	int result = EQMACMQ_REAL_CBuffWindow__PostDraw(this_ptr);
 
@@ -403,22 +404,22 @@ int __fastcall EQMACMQ_DETOUR_CBuffWindow__PostDraw(CBuffWindow* this_ptr, void*
 		return result;
 	}
 
-        _EQBUFFINFO* buffs = GetStartBuffArray(is_song_window);
-        int num_buffs = 0;
+	_EQBUFFINFO* buffs = GetStartBuffArray(is_song_window);
+	int num_buffs = 0;
 
-        for (size_t i = 0; i < buff_count; ++i) {
-                EQBUFFINFO& buff = buffs[i];
-                if (!EQ_Spell::IsValidSpellIndex(buff.SpellId) || buff.BuffType == 0) {
-                        continue;
-                }
+	for (size_t i = 0; i < buff_count; ++i) {
+		EQBUFFINFO& buff = buffs[i];
+		if (!EQ_Spell::IsValidSpellIndex(buff.SpellId) || buff.BuffType == 0) {
+			continue;
+		}
 
-                if (is_song_window) {
-                        ++num_buffs;
-                }
+		if (is_song_window) {
+			++num_buffs;
+		}
 
-                if (buff.Ticks == 0) {
-                        continue;
-                }
+		if (buff.Ticks == 0) {
+			continue;
+		}
 
 		char buffTimeText[128];
 		EQ_GetShortTickTimeString(buff.Ticks, buffTimeText, sizeof(buffTimeText));
@@ -439,12 +440,12 @@ int __fastcall EQMACMQ_DETOUR_CBuffWindow__PostDraw(CBuffWindow* this_ptr, void*
 		}
 	}
 
-        if (is_song_window) {
-                if (this_ptr->IsVisibile()) {
-                        if ((num_buffs == 0 && g_bSongWindowAutoHide) || buff_count == 0) {
-                                this_ptr->Show(0, 1);
-                        }
-                }
+	if (is_song_window) {
+		if (this_ptr->IsVisibile()) {
+			if (num_buffs == 0 && (g_bSongWindowAutoHide || Rule_Num_Short_Buffs == 0)) {
+				this_ptr->Show(0, 1);
+			}
+		}
 		else if (num_buffs > 0) {
 			this_ptr->Show(1, 1);
 		}
@@ -562,21 +563,21 @@ int __fastcall EQMACMQ_DETOUR_CEverQuest__InterpretCmd(void* this_ptr, void* /*n
 		//);
 
 			// Feedback
-			print_chat("Song Window auto-hide: %s.", g_bSongWindowAutoHide ? "ON" : "OFF");
+		print_chat("Song Window auto-hide: %s.", g_bSongWindowAutoHide ? "ON" : "OFF");
 
-			if (auto* wnd = GetShortDurationBuffWindow()) {
-				if (!g_bSongWindowAutoHide && !wnd->IsVisibile()) {
-					wnd->Show(1, 1);
-				}
-				else if (g_bSongWindowAutoHide && wnd->IsVisibile()) {
-					wnd->Show(0, 1);
-				}
+		if (auto* wnd = GetShortDurationBuffWindow()) {
+			if (!g_bSongWindowAutoHide && !wnd->IsVisibile()) {
+				wnd->Show(1, 1);
 			}
-
-			return 0; // handled
+			else if (g_bSongWindowAutoHide && wnd->IsVisibile()) {
+				wnd->Show(0, 1);
+			}
 		}
 
-		return EQMACMQ_REAL_CEverQuest__InterpretCmd(this_ptr, a1, a2);
+		return 0; // handled
+	}
+
+	return EQMACMQ_REAL_CEverQuest__InterpretCmd(this_ptr, a1, a2);
 }
 //int __fastcall EQMACMQ_DETOUR_CEverQuest__InterpretCmd(void* this_ptr, void* /*not_used*/, EQPlayer* a1, char* a2)
 //{
@@ -1183,16 +1184,16 @@ typedef int(__thiscall* EQ_FUNCTION_TYPE_EQCharacter__GetMaxBuffs)(EQCHARINFO* t
 EQ_FUNCTION_TYPE_EQCharacter__GetMaxBuffs EQCharacter__GetMaxBuffs_Trampoline;
 int __fastcall EQCHARACTER__GetMaxBuffs_Detour(EQCHARINFO* player, int unused)
 {
-        // While the song window is drawing, only expose the number of short-duration slots so the
-        // client doesn't walk the long-buff array and duplicate timers into song positions.
-        if (ShortBuffSupport_ReturnSongBuffs) {
-                return GetShortBuffCount();
-        }
+	// While the song window is drawing, expose the expanded cap (15 + song slots)
+	// so the client walks the short-buff array rather than mirroring long buffs.
+	if (ShortBuffSupport_ReturnSongBuffs) {
+		return Rule_Max_Buffs;
+	}
 
 	EQSPAWNINFO* spawn_info = player ? player->SpawnInfo : nullptr;
 	if (spawn_info) {
 		if (spawn_info->Type == EQ_SPAWN_TYPE_PLAYER) {
-		return EQ_NUM_BUFFS;
+			return EQ_NUM_BUFFS;
 		}
 		if (spawn_info->Type == EQ_SPAWN_TYPE_NPC) {
 			return 30;
@@ -1205,22 +1206,23 @@ int __fastcall EQCHARACTER__GetMaxBuffs_Detour(EQCHARINFO* player, int unused)
 typedef _EQBUFFINFO* (__thiscall* EQ_FUNCTION_TYPE_EQCharacter__GetBuff)(EQCHARINFO* this_char_info, int buff_slot);
 EQ_FUNCTION_TYPE_EQCharacter__GetBuff EQCharacter__GetBuff_Trampoline;
 _EQBUFFINFO* __fastcall EQCharacter__GetBuff_Detour(EQCHARINFO* player, int unused, WORD buff_slot) {
-        if (ShortBuffSupport_ReturnSongBuffs) {
-                const int short_count = GetShortBuffCount();
-                if (buff_slot < short_count) {
-                        buff_slot += EQ_NUM_BUFFS;
-                }
-        }
-        return EQCharacter__GetBuff_Trampoline(player, buff_slot);
+	if (ShortBuffSupport_ReturnSongBuffs && buff_slot < EQ_NUM_BUFFS) {
+		buff_slot += EQ_NUM_BUFFS;
+	}
+	return EQCharacter__GetBuff_Trampoline(player, buff_slot);
 }
 
 // Hook that removes buffs or shows spell info when clicking the song window, and shows tooltips on mouseover
 int __fastcall CBuffWindow__WndNotification_Detour(CBuffWindow* self, int unused, PEQCBUFFBUTTONWND sender, int type, int a4)
 {
-        // Shared hook with CBuffWindow
-        // Use the right buff slot offset based on the window.
-        const bool is_song_window = (self == GetShortDurationBuffWindow());
-        const int buff_count = is_song_window ? GetShortBuffCount() : EQ_NUM_BUFFS;
+	// Shared hook with CBuffWindow
+	// Use the right buff slot offset based on the window.
+	const bool is_song_window = (self == GetShortDurationBuffWindow());
+	const int short_count = GetShortBuffCount();
+	const int buff_count = is_song_window
+		? (short_count > 0 ? short_count : EQ_NUM_BUFFS)
+		: EQ_NUM_BUFFS;
+	const int start_buff_index = is_song_window ? EQ_NUM_BUFFS : 0;
 
 	if (type != 1)
 	{
@@ -1235,17 +1237,18 @@ int __fastcall CBuffWindow__WndNotification_Detour(CBuffWindow* self, int unused
 	}
 	if (AltPressed())
 		goto LABEL_11;
-        for (int i = 0; i < buff_count; i++) {
-                if (self->Data.BuffButtonWnd[i] == sender) {
-                        const bool prev = ShortBuffSupport_ReturnSongBuffs;
-                        MakeGetBuffReturnSongs(is_song_window);
-                        if (EQ_Character::IsValidAffect(EQ_OBJECT_CharInfo, i)) {
-                                EQ_Character::RemoveMyAffect(EQ_OBJECT_CharInfo, i);
-                        }
-                        MakeGetBuffReturnSongs(prev);
-                        return CSidlScreenWnd::WndNotification(self, sender, type, a4);
-                }
-        }
+	for (int i = 0; i < buff_count; i++) {
+		if (self->Data.BuffButtonWnd[i] == sender) {
+			const bool prev = ShortBuffSupport_ReturnSongBuffs;
+			MakeGetBuffReturnSongs(is_song_window);
+			const int buff_slot = i + start_buff_index;
+			if (EQ_Character::IsValidAffect(EQ_OBJECT_CharInfo, buff_slot)) {
+				EQ_Character::RemoveMyAffect(EQ_OBJECT_CharInfo, buff_slot);
+			}
+			MakeGetBuffReturnSongs(prev);
+			return CSidlScreenWnd::WndNotification(self, sender, type, a4);
+		}
+	}
 	return CSidlScreenWnd::WndNotification(self, sender, type, a4);
 }
 
@@ -1365,15 +1368,15 @@ static void InstallSongWindowHooks()
 			(PBYTE)EQ_FUNCTION_CBuffWindow__RefreshBuffDisplay,
 			(PBYTE)EQMACMQ_DETOUR_CBuffWindow__RefreshBuffDisplay);
 
-        EQMACMQ_REAL_CBuffWindow__PostDraw =
-                (EQ_FUNCTION_TYPE_CBuffWindow__PostDraw)DetourFunction(
-                        (PBYTE)EQ_FUNCTION_CBuffWindow__PostDraw,
-                        (PBYTE)EQMACMQ_DETOUR_CBuffWindow__PostDraw);
+	EQMACMQ_REAL_CBuffWindow__PostDraw =
+		(EQ_FUNCTION_TYPE_CBuffWindow__PostDraw)DetourFunction(
+			(PBYTE)EQ_FUNCTION_CBuffWindow__PostDraw,
+			(PBYTE)EQMACMQ_DETOUR_CBuffWindow__PostDraw);
 
-        EQMACMQ_REAL_CBuffWindow__OnProcessFrame =
-                (EQ_FUNCTION_TYPE_CBuffWindow__OnProcessFrame)DetourFunction(
-                        (PBYTE)EQ_FUNCTION_CBuffWindow__OnProcessFrame,
-                        (PBYTE)EQMACMQ_DETOUR_CBuffWindow__OnProcessFrame);
+	EQMACMQ_REAL_CBuffWindow__OnProcessFrame =
+		(EQ_FUNCTION_TYPE_CBuffWindow__OnProcessFrame)DetourFunction(
+			(PBYTE)EQ_FUNCTION_CBuffWindow__OnProcessFrame,
+			(PBYTE)EQMACMQ_DETOUR_CBuffWindow__OnProcessFrame);
 
 	// Helper hooks that run callbacks
 	EnterZone_Trampoline = (EQ_FUNCTION_TYPE_EnterZone)DetourFunction((PBYTE)0x53D2C4, (PBYTE)EnterZone_Detour); // OnZone callbacks
@@ -1407,7 +1410,7 @@ static void InstallSongWindowHooks()
 	//InitGameUICallbacks.push_back(ShortBuffWindow_InitUI); // Loads Song window
 	//ActivateUICallbacks.push_back(ShowBuffWindow_ActivateUI);
 	//CleanUpUICallbacks.push_back(ShortBuffWindow_CleanUI);
-	
+
 	// [BuffStackingPacth:SongWindow]
 	EQCharacter__GetBuff_Trampoline = (EQ_FUNCTION_TYPE_EQCharacter__GetBuff)DetourFunction((PBYTE)0x004C465A, (PBYTE)EQCharacter__GetBuff_Detour); // Supports reading buffs 16-30 in Song Window
 	EQCharacter__GetMaxBuffs_Trampoline = (EQ_FUNCTION_TYPE_EQCharacter__GetMaxBuffs)DetourFunction((PBYTE)0x004C4637, (PBYTE)EQCHARACTER__GetMaxBuffs_Detour); // Uses 16+ buffs for buff loops (stat calcs etc)
