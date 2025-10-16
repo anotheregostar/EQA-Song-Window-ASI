@@ -250,129 +250,139 @@ bool __cdecl GetLabelFromEQ_Detour(int EqType, PEQCXSTR* str, bool* override_col
 
 void __fastcall EQMACMQ_DETOUR_CBuffWindow__RefreshBuffDisplay(CBuffWindow* this_ptr, void* /*not_used*/)
 {
-	PEQCBUFFWINDOW buffWindow = (PEQCBUFFWINDOW)this_ptr;
-	PEQCHARINFO charInfo = (PEQCHARINFO)EQ_OBJECT_CharInfo;
-
-	if (charInfo == NULL)
-	{
+	// Pass-through for the normal buff window — never touch it from this ASI.
+	CBuffWindow* songWnd = GetShortDurationBuffWindow();
+	if (!songWnd || this_ptr != songWnd) {
+		EQMACMQ_REAL_CBuffWindow__RefreshBuffDisplay(this_ptr);
 		return;
 	}
 
-	// Supports ShortBuffWindow(Songs) and BuffWindow, which use different buff offsets
-	bool is_song_window = (this_ptr == GetShortDurationBuffWindow());
-	_EQBUFFINFO* buffs = GetStartBuffArray(is_song_window);
+	// --- SONG WINDOW PATH ---
+	auto* buffWindow = (PEQCBUFFWINDOW)this_ptr;
+	auto* charInfo = (PEQCHARINFO)EQ_OBJECT_CharInfo;
+	if (!charInfo) {
+		return;
+	}
 
-	MakeGetBuffReturnSongs(is_song_window);
-	EQMACMQ_REAL_CBuffWindow__RefreshBuffDisplay(this_ptr);
+	// Render using song slots (15..29) so indices/buttons line up.
+	MakeGetBuffReturnSongs(true);
+	EQMACMQ_REAL_CBuffWindow__RefreshBuffDisplay(this_ptr); // <- DLL does its thing here
 	MakeGetBuffReturnSongs(false);
 
+	// Now SANITIZE the tooltips so there is exactly ONE timer.
+	_EQBUFFINFO* buffs = GetStartBuffArray(/*is_song_window=*/true);
 	int num_buffs = 0;
 
-	// -- Standard Dll Support Buff Text / Timer --
-	for (size_t i = 0; i < EQ_NUM_BUFFS; i++)
+	for (size_t i = 0; i < EQ_NUM_BUFFS; ++i)
 	{
-		EQBUFFINFO& buff = buffs[i];
-		if (!EQ_Spell::IsValidSpellIndex(buff.SpellId) || buff.BuffType == 0)
-		{
+		EQBUFFINFO& b = buffs[i];
+		if (!EQ_Spell::IsValidSpellIndex(b.SpellId) || b.BuffType == 0)
 			continue;
+
+		++num_buffs;
+
+		// Rebuild tooltip from scratch: "Spell Name (m:ss)" or "Spell Name"
+		const EQSPELLINFO* sp = EQ_Spell::GetSpell(b.SpellId);
+		const char* spellName = sp ? sp->Name : "";
+
+		char rebuilt[256]; rebuilt[0] = '\0';
+
+		// Always start with just the spell name
+		_snprintf_s(rebuilt, sizeof(rebuilt), _TRUNCATE, "%s", spellName);
+
+		// Append exactly one timer if we have ticks
+		if (b.Ticks > 0) {
+			char tickStr[64];
+			EQ_GetTickTimeString(b.Ticks, tickStr, sizeof(tickStr));
+			_snprintf_s(rebuilt, sizeof(rebuilt), _TRUNCATE, "%s (%s)", spellName, tickStr);
 		}
-		num_buffs++;
 
-		int buffTicks = buff.Ticks;
-
-		if (buffTicks == 0)
-		{
-			continue;
-		}
-
-		PEQCBUFFBUTTONWND buffButtonWnd = buffWindow->BuffButtonWnd[i];
-
-		if (buffButtonWnd && buffButtonWnd->CSidlWnd.EQWnd.ToolTipText)
-		{
-			char buffTickTimeText[128];
-			EQ_GetTickTimeString(buffTicks, buffTickTimeText, sizeof(buffTickTimeText));
-
-			char buffTimeText[128];
-			_snprintf_s(buffTimeText, sizeof(buffTimeText), _TRUNCATE, " (%s)", buffTickTimeText);
-
-			EQ_CXStr_Append(&buffButtonWnd->CSidlWnd.EQWnd.ToolTipText, buffTimeText);
+		// Push rebuilt tooltip back to the button
+		if (auto* btn = buffWindow->BuffButtonWnd[i]) {
+			if (btn->CSidlWnd.EQWnd.ToolTipText) {
+				EQ_CXStr_Set(&btn->CSidlWnd.EQWnd.ToolTipText, rebuilt);
+			}
 		}
 	}
 
-	if (is_song_window)
-	{
-		if (this_ptr->IsVisibile())
-		{
-			if (num_buffs == 0 && (g_bSongWindowAutoHide || Rule_Num_Short_Buffs == 0)) // Visible, but support is disabled or auto-hide
-				this_ptr->Show(0, 1);
-			return;
-		}
+	// Song window auto-show/hide (no drawing; just visibility control)
+	if (this_ptr->IsVisibile()) {
+		if ((num_buffs == 0 && g_bSongWindowAutoHide) || Rule_Num_Short_Buffs == 0)
+			this_ptr->Show(0, 1);
+	}
+	else {
 		if (num_buffs > 0)
-		{
-			// Not visible and we have buffs. Show.
 			this_ptr->Show(1, 1);
-		}
 	}
 }
 
+// Forward declarations placed before PostDraw
+static bool IsSongBuffButton(CXWnd* w);
+typedef void(__thiscall* EQ_FUNCTION_TYPE_CXWnd__DrawTooltipAtPoint)(CXWnd* this_ptr, int x, int y);
+extern EQ_FUNCTION_TYPE_CXWnd__DrawTooltipAtPoint REAL_CXWnd__DrawTooltipAtPoint;
+
 int __fastcall EQMACMQ_DETOUR_CBuffWindow__PostDraw(CBuffWindow* this_ptr, void* /*not_used*/)
 {
-
+	// Let the window render normally first.
 	int result = EQMACMQ_REAL_CBuffWindow__PostDraw(this_ptr);
 
-	PEQCBUFFWINDOW buffWindow = (PEQCBUFFWINDOW)this_ptr;
-
-	PEQCHARINFO charInfo = (PEQCHARINFO)EQ_OBJECT_CharInfo;
-
-	if (charInfo == NULL)
-	{
-		return result;
+	// Only draw our tooltip for the Song (Short Buff) window.
+	CBuffWindow* songWnd = GetShortDurationBuffWindow();
+	if (!songWnd || this_ptr != songWnd) {
+		return result; // never touch the main buff window
 	}
 
-	bool is_song_window = (this_ptr == GetShortDurationBuffWindow());
-	_EQBUFFINFO* buffs = GetStartBuffArray(is_song_window); // Song Window Support
+	auto* buffWindow = (PEQCBUFFWINDOW)this_ptr;
+	auto* charInfo = (PEQCHARINFO)EQ_OBJECT_CharInfo;
+	if (!charInfo) return result;
 
-	for (size_t i = 0; i < EQ_NUM_BUFFS; i++)
+	// Read from the song range (15..29)
+	_EQBUFFINFO* buffs = GetStartBuffArray(/*is_song_window=*/true);
+
+	for (size_t i = 0; i < EQ_NUM_BUFFS; ++i)
 	{
 		EQBUFFINFO& buff = buffs[i];
-
 		if (!EQ_Spell::IsValidSpellIndex(buff.SpellId) || buff.BuffType == 0)
-		{
 			continue;
-		}
 
-		int buffTicks = buff.Ticks;
-		if (buffTicks == 0)
-		{
+		const int ticks = buff.Ticks;
+		if (ticks <= 0)
 			continue;
-		}
-		char buffTimeText[128];
-		EQ_GetShortTickTimeString(buffTicks, buffTimeText, sizeof(buffTimeText));
 
-		PEQCBUFFBUTTONWND buffButtonWnd = buffWindow->BuffButtonWnd[i];
+		// Build exactly one tooltip line (you can include name or just time)
+		char timeText[64];
+		EQ_GetShortTickTimeString(ticks, timeText, sizeof(timeText));
 
-		if (buffButtonWnd && buffButtonWnd->CSidlWnd.EQWnd.ToolTipText)
-		{
-			buffButtonWnd->CSidlWnd.EQWnd.FontPointer->Size = g_buffWindowTimersFontSize;
+		// If you want "Spell Name (m:ss)" instead of just "(m:ss)", do:
+		// const EQSPELLINFO* sp = EQ_Spell::GetSpell(buff.SpellId);
+		// _snprintf_s(timeText, sizeof(timeText), _TRUNCATE, "%s (%s)", sp ? sp->Name : "", timeText);
 
-			char originalToolTipText[128];
-			strncpy_s(originalToolTipText, sizeof(originalToolTipText), buffButtonWnd->CSidlWnd.EQWnd.ToolTipText->Text, _TRUNCATE);
+		auto* btn = buffWindow->BuffButtonWnd[i];
+		if (!btn || !btn->CSidlWnd.EQWnd.ToolTipText) continue;
 
-			EQ_CXStr_Set(&buffButtonWnd->CSidlWnd.EQWnd.ToolTipText, buffTimeText);
+		// Save current tooltip & font
+		int oldFontSize = btn->CSidlWnd.EQWnd.FontPointer->Size;
+		btn->CSidlWnd.EQWnd.FontPointer->Size = g_buffWindowTimersFontSize;
 
-			CXRect relativeRect = ((CXWnd*)buffButtonWnd)->GetScreenRect();
+		char original[256];
+		strncpy_s(original, sizeof(original),
+			btn->CSidlWnd.EQWnd.ToolTipText->Text ? btn->CSidlWnd.EQWnd.ToolTipText->Text : "",
+			_TRUNCATE);
 
-			((CXWnd*)buffButtonWnd)->DrawTooltipAtPoint(relativeRect.X1, relativeRect.Y1);
+		// Swap to our single tooltip string
+		EQ_CXStr_Set(&btn->CSidlWnd.EQWnd.ToolTipText, timeText);
 
-			EQ_CXStr_Set(&buffButtonWnd->CSidlWnd.EQWnd.ToolTipText, originalToolTipText);
+		// Draw using the ORIGINAL function pointer to bypass our suppression detour
+		CXRect r = ((CXWnd*)btn)->GetScreenRect();
+		REAL_CXWnd__DrawTooltipAtPoint((CXWnd*)btn, r.X1, r.Y1);
 
-			buffButtonWnd->CSidlWnd.EQWnd.FontPointer->Size = EQ_FONT_SIZE_DEFAULT;
-		}
+		// Restore tooltip text & font
+		EQ_CXStr_Set(&btn->CSidlWnd.EQWnd.ToolTipText, original);
+		btn->CSidlWnd.EQWnd.FontPointer->Size = oldFontSize;
 	}
 
 	return result;
 }
-
 
 int __fastcall EQMACMQ_DETOUR_EQ_Character__CastSpell(void* this_ptr, void* not_used, unsigned char a1, short a2, EQITEMINFO** a3, short a4)
 {
@@ -978,6 +988,32 @@ void MakeGetBuffReturnSongs(bool enabled) {
 	ShortBuffSupport_ReturnSongBuffs = enabled;
 }
 
+// Returns true if 'w' is one of the button widgets in the Song (Short Buff) window.
+static bool IsSongBuffButton(CXWnd* w)
+{
+	auto* sw = (PEQCBUFFWINDOW)GetShortDurationBuffWindow();
+	if (!sw || !w) return false;
+
+	for (size_t i = 0; i < EQ_NUM_BUFFS; ++i) {
+		if ((CXWnd*)sw->BuffButtonWnd[i] == w) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// CXWnd::DrawTooltipAtPoint – original function pointer
+typedef void(__thiscall* EQ_FUNCTION_TYPE_CXWnd__DrawTooltipAtPoint)(CXWnd* this_ptr, int x, int y);
+EQ_FUNCTION_TYPE_CXWnd__DrawTooltipAtPoint REAL_CXWnd__DrawTooltipAtPoint = nullptr;
+
+void __fastcall DETOUR_CXWnd__DrawTooltipAtPoint(CXWnd* this_ptr, void* /*edx*/, int x, int y)
+{
+	if (IsSongBuffButton(this_ptr)) {
+		return;
+	}
+	REAL_CXWnd__DrawTooltipAtPoint(this_ptr, x, y);
+}
+
 // MaxBuffs is now increased when enabled (Rule_Max_Buffs)
 typedef int(__thiscall* EQ_FUNCTION_TYPE_EQCharacter__GetMaxBuffs)(EQCHARINFO* this_ptr);
 EQ_FUNCTION_TYPE_EQCharacter__GetMaxBuffs EQCharacter__GetMaxBuffs_Trampoline;
@@ -1135,6 +1171,13 @@ static void InstallSongWindowHooks()
 		(EQ_FUNCTION_TYPE_CBuffWindow__PostDraw)DetourFunction(
 			(PBYTE)EQ_FUNCTION_CBuffWindow__PostDraw,
 			(PBYTE)EQMACMQ_DETOUR_CBuffWindow__PostDraw);
+
+	// Block base DLL tooltip overlays for Song-window buttons (prevents duplicate timers)
+	REAL_CXWnd__DrawTooltipAtPoint =
+		(EQ_FUNCTION_TYPE_CXWnd__DrawTooltipAtPoint)DetourFunction(
+			(PBYTE)EQ_FUNCTION_CXWnd__DrawTooltipAtPoint,
+			(PBYTE)DETOUR_CXWnd__DrawTooltipAtPoint
+		);
 
 	// Helper hooks that run callbacks
 	EnterZone_Trampoline = (EQ_FUNCTION_TYPE_EnterZone)DetourFunction((PBYTE)0x53D2C4, (PBYTE)EnterZone_Detour); // OnZone callbacks
